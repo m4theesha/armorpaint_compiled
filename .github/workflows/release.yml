@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-d3d12
+          - os: ubuntu-latest
+            name: linux-vulkan
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt install make clang libvulkan-dev libgtk-3-dev libasound2-dev --yes --quiet
+
+    - name: Compile
+      run: |
+        cd paint
+        ../base/make --compile
+
+    - name: Package (Windows)
+      if: runner.os == 'Windows'
+      run: Compress-Archive -Path paint/build/out/* -DestinationPath armorpaint-${{ matrix.name }}-${{ github.ref_name }}.zip
+
+    - name: Package (Linux)
+      if: runner.os == 'Linux'
+      run: tar -czf armorpaint-${{ matrix.name }}-${{ github.ref_name }}.tar.gz -C paint/build/out .
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: armorpaint-${{ matrix.name }}
+        path: |
+          armorpaint-${{ matrix.name }}-${{ github.ref_name }}.zip
+          armorpaint-${{ matrix.name }}-${{ github.ref_name }}.tar.gz
+        if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+
+    - uses: softprops/action-gh-release@v2
+      with:
+        files: dist/*
+        generate_release_notes: true
